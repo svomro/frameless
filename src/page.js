@@ -219,6 +219,19 @@ function getViewState() {
   };
 }
 
+// Opening from Finder gives us a filesystem path rather than the File object a
+// drop produces. Encoding each path segment keeps spaces, "#" and "?" in a
+// filename from truncating the URL. Everything after this is shared with the
+// drop path: the load and error listeners below do the rest.
+window.imageFiles?.onOpen((filePath) => {
+  if (!filePath) return;
+
+  pendingFileName = filePath.split("/").pop();
+  if (dropZone.classList.contains("error")) showInitialState();
+
+  image.src = `file://${filePath.split("/").map(encodeURIComponent).join("/")}`;
+});
+
 dropZone.addEventListener("drop", onDrop);
 body.addEventListener("drop", onDrop);
 image.addEventListener("load", () => {

@@ -21,7 +21,19 @@
   "config": {
     "forge": {
       "packagerConfig": {
-        "icon": "assets/icon.icns"
+        "icon": "assets/icon.icns",
+        "extendInfo": {
+          "CFBundleDocumentTypes": [
+            {
+              "CFBundleTypeName": "Image",
+              "CFBundleTypeRole": "Viewer",
+              "LSHandlerRank": "Alternate",
+              "LSItemContentTypes": [
+                "public.image"
+              ]
+            }
+          ]
+        }
       },
       "makers": [
         {

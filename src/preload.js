@@ -10,3 +10,8 @@ contextBridge.exposeInMainWorld("windowControls", {
     ipcRenderer.send("lock-to-image-size", width, height),
   unlockAspectRatio: () => ipcRenderer.send("unlock-aspect-ratio"),
 });
+
+contextBridge.exposeInMainWorld("imageFiles", {
+  onOpen: (callback) =>
+    ipcRenderer.on("open-image", (event, filePath) => callback(filePath)),
+});

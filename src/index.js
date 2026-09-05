@@ -9,6 +9,39 @@ if (require("electron-squirrel-startup")) {
 
 let alwaysOnTop = true;
 let grabOffset;
+let mainWindow = null;
+
+// Finder delivers a double-clicked or "Open With" file through open-file, and
+// on a cold start that fires before the window (or even app.ready) exists, so
+// hold the path until a renderer is actually there to receive it.
+let pendingOpenPath = null;
+
+const openImageInWindow = (filePath) => {
+  if (typeof filePath !== "string" || !filePath) return;
+
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    pendingOpenPath = filePath;
+    return;
+  }
+
+  if (mainWindow.webContents.isLoading()) {
+    pendingOpenPath = filePath;
+    return;
+  }
+
+  mainWindow.webContents.send("open-image", filePath);
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.focus();
+};
+
+// open-file must be subscribed before the app finishes launching, otherwise the
+// very first file (the one that launched the app) is dropped on the floor.
+app.on("will-finish-launching", () => {
+  app.on("open-file", (event, filePath) => {
+    event.preventDefault();
+    openImageInWindow(filePath);
+  });
+});
 
 // Math.round returns -0 for anything in [-0.5, 0), and Electron's native
 // argument conversion rejects -0 outright: dragging the window across y = 0
@@ -139,7 +172,7 @@ ipcMain.on("unlock-aspect-ratio", (event) => {
 
 const createWindow = () => {
   // Create the browser window.
-  const mainWindow = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: 800,
     height: 600,
     minWidth: 160,
@@ -170,6 +203,14 @@ const createWindow = () => {
 
   // and load the index.html of the app.
   mainWindow.loadFile(path.join(__dirname, "index.html"));
+
+  // Flush a file that arrived while the renderer was still loading.
+  mainWindow.webContents.on("did-finish-load", () => {
+    if (!pendingOpenPath) return;
+
+    mainWindow.webContents.send("open-image", pendingOpenPath);
+    pendingOpenPath = null;
+  });
 
   const showContextMenu = ({ hasImage = false, viewMode } = {}) => {
     Menu.buildFromTemplate([
