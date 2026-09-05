@@ -1,13 +1,14 @@
 {
-  "name": "image-viewer",
-  "productName": "Image Viewer",
+  "name": "frameless",
+  "productName": "Frameless",
   "version": "1.0.0",
   "description": "Simple drag-and-drop viewer for images",
   "main": "src/index.js",
   "scripts": {
     "start": "electron-forge start",
-    "package": "electron-forge package",
-    "make": "electron-forge make",
+    "icon:export": "electron scripts/export-mac-icon.cjs",
+    "package": "npm run icon:export && electron-forge package",
+    "make": "npm run icon:export && electron-forge make",
     "publish": "electron-forge publish",
     "lint": "echo \"No linting configured\""
   },
@@ -19,12 +20,14 @@
   "license": "MIT",
   "config": {
     "forge": {
-      "packagerConfig": {},
+      "packagerConfig": {
+        "icon": "assets/icon.icns"
+      },
       "makers": [
         {
           "name": "@electron-forge/maker-squirrel",
           "config": {
-            "name": "image_viewer"
+            "name": "frameless"
           }
         },
         {
@@ -53,6 +56,7 @@
     "@electron-forge/maker-rpm": "^6.0.0-beta.57",
     "@electron-forge/maker-squirrel": "^6.0.0-beta.57",
     "@electron-forge/maker-zip": "^6.0.0-beta.57",
-    "electron": "13.1.4"
+    "electron": "13.1.4",
+    "three": "0.128.0"
   }
 }

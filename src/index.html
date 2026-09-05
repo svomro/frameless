@@ -2,19 +2,27 @@
 <html style="-webkit-app-region: drag">
   <head>
     <meta charset="UTF-8" />
-    <title>Image Viewer</title>
+    <title>Frameless</title>
     <link rel="stylesheet" href="index.css" />
   </head>
   <body id="main">
-    <section class="dropzone">
-      <h1>+</h1>
-      <p>Drop an image here!</p>
+    <section class="dropzone state-preview">
+      <h1 id="dropzone-symbol">+</h1>
+      <p id="dropzone-message">Drop an image here!</p>
+      <p id="dropzone-detail" class="dropzone-detail" hidden></p>
     </section>
     <img id="image" />
-    <div id="zoom">
-      <input type="range" min="1" max="100" value="50" id="range" />
-      ·
-      <button id="clear" onClick="fitZoom()">Fit to window</button>
+    <div id="opacity-control" class="opacity-control" hidden>
+      <input
+        id="opacity-slider"
+        type="range"
+        min="0"
+        max="100"
+        step="1"
+        value="100"
+        aria-label="Image opacity"
+      />
+      <output id="opacity-value" for="opacity-slider">100%</output>
     </div>
     <script src="page.js"></script>
   </body>
