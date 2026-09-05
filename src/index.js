@@ -214,8 +214,12 @@ const createWindow = () => {
 
   const showContextMenu = ({ hasImage = false, viewMode } = {}) => {
     Menu.buildFromTemplate([
+      // Exact Fit and Original Size are two mutually exclusive layouts, not
+      // switches: there is no third mode to fall back to, so neither can be
+      // turned "off". Checkboxes implied otherwise and made Exact Fit look
+      // stuck on, because clicking an already-checked one is a no-op.
       {
-        type: "checkbox",
+        type: "radio",
         label: "Exact Fit (Image = Window)",
         accelerator: "CmdOrCtrl+0",
         checked: viewMode === "lock",
@@ -223,7 +227,7 @@ const createWindow = () => {
         click: () => mainWindow.webContents.executeJavaScript("exactFit()"),
       },
       {
-        type: "checkbox",
+        type: "radio",
         label: "Original Size",
         checked: viewMode === "original",
         enabled: hasImage,
