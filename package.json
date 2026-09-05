@@ -7,7 +7,7 @@
   "scripts": {
     "start": "electron-forge start",
     "icon:export": "electron scripts/export-mac-icon.cjs",
-    "package": "npm run icon:export && electron-forge package",
+    "package": "electron-forge package",
     "make": "npm run icon:export && electron-forge make",
     "publish": "electron-forge publish",
     "lint": "echo \"No linting configured\""
