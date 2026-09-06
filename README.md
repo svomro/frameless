@@ -10,6 +10,7 @@ It is meant for keeping a reference image floating beside your work without a ti
 
 - Frameless, transparent image window
 - Drag and drop an image from Finder to open it
+- Open multiple images in independent windows without replacing an existing viewer
 - Drag the image itself to move the window, including between displays
 - Always-on-top mode
 - Exact Fit mode keeps the window and image locked to the same shape while resizing

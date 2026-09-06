@@ -7,31 +7,23 @@ if (require("electron-squirrel-startup")) {
   app.quit();
 }
 
-let alwaysOnTop = true;
-let grabOffset;
-let mainWindow = null;
+const grabOffsets = new WeakMap();
 
-// Finder delivers a double-clicked or "Open With" file through open-file, and
-// on a cold start that fires before the window (or even app.ready) exists, so
-// hold the path until a renderer is actually there to receive it.
-let pendingOpenPath = null;
+// Finder delivers a double-clicked or "Open With" file through open-file. On a
+// cold start that event can arrive before Electron is ready, so keep every path
+// until BrowserWindow can be constructed. Each path gets its own viewer window;
+// opening another image must never replace the image in an existing window.
+const pendingOpenPaths = [];
 
-const openImageInWindow = (filePath) => {
+const openImageInNewWindow = (filePath) => {
   if (typeof filePath !== "string" || !filePath) return;
 
-  if (!mainWindow || mainWindow.isDestroyed()) {
-    pendingOpenPath = filePath;
+  if (!app.isReady()) {
+    pendingOpenPaths.push(filePath);
     return;
   }
 
-  if (mainWindow.webContents.isLoading()) {
-    pendingOpenPath = filePath;
-    return;
-  }
-
-  mainWindow.webContents.send("open-image", filePath);
-  if (mainWindow.isMinimized()) mainWindow.restore();
-  mainWindow.focus();
+  createWindow(filePath);
 };
 
 // open-file must be subscribed before the app finishes launching, otherwise the
@@ -39,7 +31,7 @@ const openImageInWindow = (filePath) => {
 app.on("will-finish-launching", () => {
   app.on("open-file", (event, filePath) => {
     event.preventDefault();
-    openImageInWindow(filePath);
+    openImageInNewWindow(filePath);
   });
 });
 
@@ -59,14 +51,20 @@ const toInt = (value) => Math.round(value) || 0;
 ipcMain.on("start-window-drag", (event, offsetX, offsetY) => {
   if (!Number.isFinite(offsetX) || !Number.isFinite(offsetY)) return;
 
-  grabOffset = { x: offsetX, y: offsetY };
+  const window = BrowserWindow.fromWebContents(event.sender);
+  if (!window) return;
+
+  grabOffsets.set(window, { x: offsetX, y: offsetY });
 });
 
 const clamp = (value, low, high) => Math.min(Math.max(value, low), high);
 
 ipcMain.on("drag-window-to-cursor", (event) => {
   const window = BrowserWindow.fromWebContents(event.sender);
-  if (!window || !grabOffset) return;
+  if (!window) return;
+
+  const grabOffset = grabOffsets.get(window);
+  if (!grabOffset) return;
 
   const cursor = screen.getCursorScreenPoint();
   const frame = window.getBounds();
@@ -170,9 +168,71 @@ ipcMain.on("unlock-aspect-ratio", (event) => {
   window.setAspectRatio(0);
 });
 
-const createWindow = () => {
-  // Create the browser window.
-  mainWindow = new BrowserWindow({
+const getTargetWindow = () => {
+  const focused = BrowserWindow.getFocusedWindow();
+  if (focused && !focused.isDestroyed()) return focused;
+  return BrowserWindow.getAllWindows().find((window) => !window.isDestroyed()) || null;
+};
+
+const syncAlwaysOnTopMenu = (window) => {
+  const item = Menu.getApplicationMenu()?.getMenuItemById("always-on-top");
+  if (!item) return;
+
+  item.enabled = Boolean(window && !window.isDestroyed());
+  item.checked = Boolean(window && !window.isDestroyed() && window.isAlwaysOnTop());
+};
+
+const setWindowAlwaysOnTop = (window, enabled) => {
+  if (!window || window.isDestroyed()) return;
+
+  window.setAlwaysOnTop(enabled, enabled ? "pop-up-menu" : "normal");
+  syncAlwaysOnTopMenu(window);
+};
+
+const toggleWindowAlwaysOnTop = (window) => {
+  if (!window || window.isDestroyed()) return;
+  setWindowAlwaysOnTop(window, !window.isAlwaysOnTop());
+};
+
+const executeInTargetWindow = (source) => {
+  const window = getTargetWindow();
+  if (!window) return;
+  window.webContents.executeJavaScript(source).catch(() => {});
+};
+
+const installApplicationMenu = () => {
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate([
+      {
+        label: "Options",
+        submenu: [
+          {
+            label: "Exact Fit (Image = Window)",
+            accelerator: "CmdOrCtrl+0",
+            click: () => executeInTargetWindow("exactFit()"),
+          },
+          {
+            label: "Opacity…",
+            accelerator: "CmdOrCtrl+Shift+O",
+            click: () => executeInTargetWindow("showOpacityControl()"),
+          },
+          { type: "separator" },
+          {
+            id: "always-on-top",
+            label: "Always on Top",
+            type: "checkbox",
+            checked: true,
+            click: () => toggleWindowAlwaysOnTop(getTargetWindow()),
+          },
+          { label: "Quit", role: "quit" },
+        ],
+      },
+    ])
+  );
+};
+
+const createWindow = (initialFilePath = null) => {
+  const window = new BrowserWindow({
     width: 800,
     height: 600,
     minWidth: 160,
@@ -187,111 +247,81 @@ const createWindow = () => {
     },
   });
 
-  mainWindow.setAlwaysOnTop(true, "pop-up-menu");
+  window.setAlwaysOnTop(true, "pop-up-menu");
+  window.loadFile(path.join(__dirname, "index.html"));
 
-  const toggleAlwaysOnTop = () => {
-    alwaysOnTop = !alwaysOnTop;
-    mainWindow.setAlwaysOnTop(
-      alwaysOnTop,
-      alwaysOnTop ? "pop-up-menu" : "normal"
-    );
-    Menu.getApplicationMenu().getMenuItemById("always-on-top").checked =
-      alwaysOnTop;
-  };
-
-  // mainWindow.webContents.openDevTools();
-
-  // and load the index.html of the app.
-  mainWindow.loadFile(path.join(__dirname, "index.html"));
-
-  // Flush a file that arrived while the renderer was still loading.
-  mainWindow.webContents.on("did-finish-load", () => {
-    if (!pendingOpenPath) return;
-
-    mainWindow.webContents.send("open-image", pendingOpenPath);
-    pendingOpenPath = null;
+  // A file belongs to this window for its whole lifetime. A later Finder
+  // open-file event creates another BrowserWindow instead of replacing it.
+  window.webContents.on("did-finish-load", () => {
+    if (typeof initialFilePath === "string" && initialFilePath) {
+      window.webContents.send("open-image", initialFilePath);
+    }
   });
 
   const showContextMenu = ({ hasImage = false, viewMode } = {}) => {
+    if (window.isDestroyed()) return;
+
     Menu.buildFromTemplate([
-      // Exact Fit and Original Size are two mutually exclusive layouts, not
-      // switches: there is no third mode to fall back to, so neither can be
-      // turned "off". Checkboxes implied otherwise and made Exact Fit look
-      // stuck on, because clicking an already-checked one is a no-op.
       {
         type: "radio",
         label: "Exact Fit (Image = Window)",
         accelerator: "CmdOrCtrl+0",
         checked: viewMode === "lock",
         enabled: hasImage,
-        click: () => mainWindow.webContents.executeJavaScript("exactFit()"),
+        click: () => window.webContents.executeJavaScript("exactFit()"),
       },
       {
         type: "radio",
         label: "Original Size",
         checked: viewMode === "original",
         enabled: hasImage,
-        click: () => mainWindow.webContents.executeJavaScript("originalSize()"),
+        click: () => window.webContents.executeJavaScript("originalSize()"),
       },
       {
         label: "Opacity…",
-        click: () =>
-          mainWindow.webContents.executeJavaScript("showOpacityControl()"),
+        click: () => window.webContents.executeJavaScript("showOpacityControl()"),
       },
       { type: "separator" },
       {
         type: "checkbox",
         label: "Always on Top",
-        checked: alwaysOnTop,
-        click: toggleAlwaysOnTop,
+        checked: window.isAlwaysOnTop(),
+        click: () => toggleWindowAlwaysOnTop(window),
       },
       { type: "separator" },
       { label: "Quit", role: "quit" },
-    ]).popup({ window: mainWindow });
+    ]).popup({ window });
   };
 
-  mainWindow.webContents.on("context-menu", () => {
-    mainWindow.webContents
+  window.webContents.on("context-menu", () => {
+    window.webContents
       .executeJavaScript("getViewState()")
       .then(showContextMenu)
       .catch(() => showContextMenu());
   });
 
-  const menuTemplate = [
-    {
-      label: "Options",
-      submenu: [
-        {
-          label: "Exact Fit (Image = Window)",
-          accelerator: "CmdOrCtrl+0",
-          click: () => mainWindow.webContents.executeJavaScript("exactFit()"),
-        },
-        {
-          label: "Opacity…",
-          accelerator: "CmdOrCtrl+Shift+O",
-          click: () =>
-            mainWindow.webContents.executeJavaScript("showOpacityControl()"),
-        },
-        { type: "separator" },
-        {
-          id: "always-on-top",
-          label: "Always on Top",
-          type: "checkbox",
-          checked: alwaysOnTop,
-          click: toggleAlwaysOnTop,
-        },
-        { label: "Quit", role: "quit" },
-      ],
-    },
-  ];
+  window.on("focus", () => syncAlwaysOnTopMenu(window));
+  window.on("closed", () => {
+    grabOffsets.delete(window);
+    syncAlwaysOnTopMenu(getTargetWindow());
+  });
 
-  Menu.setApplicationMenu(Menu.buildFromTemplate(menuTemplate));
+  return window;
 };
 
-// This method will be called when Electron has finished
-// initialization and is ready to create browser windows.
-// Some APIs can only be used after this event occurs.
-app.on("ready", createWindow);
+app.whenReady().then(() => {
+  installApplicationMenu();
+
+  if (pendingOpenPaths.length) {
+    for (const filePath of pendingOpenPaths.splice(0)) createWindow(filePath);
+  } else if (BrowserWindow.getAllWindows().length === 0) {
+    createWindow();
+  }
+
+  app.on("activate", () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  });
+});
 
 // Quit when all windows are closed, except on macOS. There, it's common
 // for applications and their menu bar to stay active until the user quits
